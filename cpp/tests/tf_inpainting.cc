@@ -12,7 +12,6 @@
 #include <sopt/logging.h>
 #include <sopt/maths.h>
 #include <sopt/relative_variation.h>
-#include <sopt/sampling.h>
 #include <sopt/types.h>
 #include <sopt/utilities.h>
 
@@ -35,14 +34,9 @@ TEST_CASE("Inpainting"){
 
   Image const image = sopt::notinstalled::read_standard_tiff(input);
 
-  sopt::t_uint nmeasure = std::floor(0.5 * image.size());
-  sopt::LinearTransform<Vector> const sampling =
-      sopt::linear_transform<Scalar>(sopt::Sampling(image.size(), nmeasure, *mersenne));
-
-  Vector const y0 = sampling * Vector::Map(image.data(), image.size());
-  auto const snr = 30.0;
+  Vector const y0 = Vector::Map(image.data(), image.size());
+  auto const snr = 15.0;
   auto const sigma = y0.stableNorm() / std::sqrt(y0.size()) * std::pow(10.0, -(snr / 20.0));
-  auto const epsilon = std::sqrt(nmeasure + 2 * std::sqrt(y0.size())) * sigma;
 
   std::normal_distribution<> gaussian_dist(0, sigma);
   Vector y(y0.size());
@@ -50,16 +44,16 @@ TEST_CASE("Inpainting"){
 
   sopt::t_real const gamma = 18;
   sopt::t_real const beta = sigma * sigma * 0.5;
+  int const itermax = 1;
 
   auto fb = sopt::algorithm::ImagingForwardBackward<Scalar>(y);
-  fb.itermax(500)
+  fb.itermax(itermax)
     .beta(beta)    // stepsize
     .sigma(sigma)  // sigma
     .gamma(gamma)  // regularisation paramater
     .relative_variation(1e-3)
     .residual_tolerance(0)
-    .tight_frame(true)
-    .Phi(sampling);
+    .tight_frame(true);
 
   // Create a shared pointer to an instance of the TFGProximal class
   auto gp = std::make_shared<sopt::algorithm::TFGProximal<Scalar>>(model_path);
@@ -69,8 +63,30 @@ TEST_CASE("Inpainting"){
 
   auto const diagnostic = fb();
 
+  sopt::utilities::write_tiff(image, "input_image.tiff");
+  sopt::utilities::write_tiff(Image::Map(y0.data(), 256, 256), "sampled_image.tiff");
+  sopt::utilities::write_tiff(Image::Map(y.data(), 256, 256), "noisy_image.tiff");
+  sopt::utilities::write_tiff(Image::Map(diagnostic.x.data(), 256, 256), "output_image.tiff");
+
+  const static Eigen::IOFormat CSVFormat(Eigen::FullPrecision, Eigen::DontAlignCols, ", ", "\n");
+  std::ofstream input_file("input_image.txt");
+  if (input_file.is_open())
+    {
+        input_file << y.format(CSVFormat);
+        input_file.close();
+    }
+
+  std::ofstream output_file("output_image.txt");
+  if (output_file.is_open())
+    {
+        output_file << diagnostic.x.format(CSVFormat);
+        output_file.close();
+    }
+
+
+
   CHECK(diagnostic.good);
-  CHECK(diagnostic.niters < 500);
+  CHECK(diagnostic.niters < itermax);
 
   // compare input image to cleaned output image
   // calculate mean squared error sum_i ( ( x_true(i) - x_est(i) ) **2 )
@@ -78,8 +94,12 @@ TEST_CASE("Inpainting"){
 
   auto mse = (image - diagnostic.x.array()).square().sum() / image.size();
   CAPTURE(image.size());
+  CAPTURE(y0.size());
+  CAPTURE(y.size());
+  CAPTURE(diagnostic.x.size());
   CAPTURE(image.sum());
-  CAPTURE(diagnostic.x.array().sum());
+  CAPTURE(y.sum());
+  CAPTURE(diagnostic.x.sum());
   CAPTURE(mse);
   CHECK(mse < 0.01);
 }

@@ -3,6 +3,9 @@ from conan.tools.cmake import CMake, CMakeToolchain, CMakeDeps
 from conan.tools.files import symlinks
 import os
 
+# meaningless change
+# another meaningless change
+# third meaningless change
 class SoptConan(ConanFile):
     name = "sopt"
     version = "4.0.0"
